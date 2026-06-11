@@ -1,0 +1,13 @@
+# 비밀키 — 절대 커밋 금지
+.env
+.env.*
+
+# 의존성 / 빌드
+node_modules/
+dist/
+
+# 런타임 데이터 (영상 원본·프레임·DB)
+server/data/
+
+# 도구 산출물
+.playwright-mcp/
