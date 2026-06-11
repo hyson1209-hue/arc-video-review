@@ -5,6 +5,8 @@
 # 의존성 / 빌드
 node_modules/
 dist/
+dist-electron/
+build/
 
 # 런타임 데이터 (영상 원본·프레임·DB)
 server/data/

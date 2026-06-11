@@ -1,0 +1,50 @@
+{
+  "name": "arc-console",
+  "productName": "ARC",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "app": "electron .",
+    "bundle:server": "esbuild server/src/index.js --bundle --platform=node --target=node22 --format=cjs --outfile=build/server/index.cjs \"--define:import.meta.url=__importMetaUrl\" \"--banner:js=const __importMetaUrl = require('node:url').pathToFileURL(__filename).href;\"",
+    "dist": "npm run build --prefix archive-review && npm run bundle:server && electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.28.0"
+  },
+  "build": {
+    "appId": "kr.arc.console",
+    "productName": "ARC",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "build/server", "to": "server" },
+      { "from": "server/rules", "to": "server/rules" },
+      { "from": "server/docs", "to": "server/docs" },
+      { "from": "archive-review/dist", "to": "web" }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

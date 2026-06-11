@@ -38,6 +38,19 @@ npm run dev --prefix archive-review
 `server/rules/금칙기준.md` 수정 → 다음 영상부터 즉시 적용 (재배포 불필요).
 운영 흐름은 `server/docs/운영절차서.md` 참고.
 
+## 데스크톱 앱 빌드 (Electron)
+
+```powershell
+npm install      # 루트 — electron · electron-builder · esbuild
+npm run dist     # → dist-electron/ARC Setup 1.0.0.exe (설치 파일)
+```
+
+- 설치 후 실행하면 내장 서버(포트 3401)가 자동으로 뜨고 창이 열린다
+- 데이터·설정 위치: `%APPDATA%\arc-console\` — `.env`(API 키), `rules\금칙기준.md`(판정 기준), `data\`(DB·영상·프레임)
+- 첫 실행 시 `.env` 템플릿이 생성되고 안내 대화상자가 뜬다 — `OPENAI_API_KEY` 를 채우고 재시작
+- ffmpeg/ffprobe 는 별도 설치 후 PATH 등록 필요 (`winget install Gyan.FFmpeg`)
+- 서버는 esbuild 로 단일 파일(`build/server/index.cjs`)로 번들되어 앱에 포함된다
+
 ## 테스트
 
 ```powershell
