@@ -1,6 +1,7 @@
-// report.jsx — 검수 리포트 (타임라인 · 위반 그리드 · 분석정보 · 삭제)
-import { useState } from "react";
-import { CATEGORIES, REPORT, severityOf, tc } from "./data.js";
+// report.jsx — 검수 리포트 (타임라인 · 위반 그리드 · 분석정보 · 삭제) — API 실데이터
+import { useEffect, useState } from "react";
+import { CATEGORIES, severityOf, tc } from "./data.js";
+import { deleteVideo, fetchReport } from "./api.js";
 import { CatChip, Icon, SevBadge, Thumb } from "./ui.jsx";
 import { AnalysisTabs, FlagModal } from "./report-info.jsx";
 
@@ -12,7 +13,7 @@ const TL_COLORS = {
 };
 
 function Timeline({ report, onPick }) {
-  const dur = report.meta.duration;
+  const dur = report.meta.duration || 1;
   const ticks = 6;
   return (
     <div>
@@ -25,7 +26,7 @@ function Timeline({ report, onPick }) {
               background: TL_COLORS[seg.kind].c, opacity: seg.kind === "ok" ? 0.5 : 1 }} />
         ))}
         {report.flags.map((f, i) => (
-          <button key={i} onClick={() => onPick(f)} title={CATEGORIES[f.cat].label + " " + tc(f.t)}
+          <button key={i} onClick={() => onPick(f)} title={(CATEGORIES[f.cat]?.label || f.cat) + " " + tc(f.t)}
             style={{ position: "absolute", top: -1, bottom: -1, left: (f.t / dur * 100) + "%", width: 3,
               transform: "translateX(-1px)", background: "var(--text)", border: "none", cursor: "pointer", padding: 0 }} />
         ))}
@@ -53,7 +54,7 @@ function Timeline({ report, onPick }) {
 
 function VerdictBanner({ report }) {
   const flags = report.flags;
-  const worst = Math.max(...flags.map(f => f.score));
+  const worst = flags.length ? Math.max(...flags.map(f => f.score)) : 0;
   const sev = severityOf(worst);
   const tally = { block: 0, warn: 0, caution: 0 };
   flags.forEach(f => { const k = severityOf(f.score).key; if (tally[k] != null) tally[k]++; });
@@ -65,7 +66,7 @@ function VerdictBanner({ report }) {
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ width: 50, height: 50, borderRadius: 12, background: toneBg, color: tone,
           display: "grid", placeItems: "center", flex: "none" }}>
-          <Icon name="alert" size={24} />
+          <Icon name={worst >= 1 ? "alert" : "check"} size={24} />
         </div>
         <div>
           <div className="eyebrow">종합 판정</div>
@@ -91,7 +92,7 @@ function VerdictBanner({ report }) {
 function FlagCard({ f, onClick }) {
   return (
     <div className="card fade" style={{ overflow: "hidden", cursor: "pointer" }} onClick={onClick}>
-      <Thumb t={f.t} sev={f.score} cat={f.cat} play />
+      <Thumb t={f.t} sev={f.score} cat={f.cat} src={f.frames?.[0]} play />
       <div style={{ padding: "10px 12px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <CatChip cat={f.cat} />
@@ -107,7 +108,7 @@ function FlagCard({ f, onClick }) {
   );
 }
 
-function DeleteModal({ title, onCancel, onConfirm }) {
+function DeleteModal({ title, busy, error, onCancel, onConfirm }) {
   return (
     <div onClick={onCancel} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.02 262 / 0.45)",
       zIndex: 70, display: "grid", placeItems: "center", padding: 24, animation: "fadeUp 0.2s ease both" }}>
@@ -121,24 +122,55 @@ function DeleteModal({ title, onCancel, onConfirm }) {
               <p style={{ margin: 0, fontSize: 13, color: "var(--text-2)", lineHeight: 1.55 }}>
                 <b>{title}</b> 의 원본과 함께 <b>리포트·검색 색인·프레임 이미지</b>가 모두 영구 삭제됩니다. 되돌릴 수 없습니다.
               </p>
+              {error && <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--block)" }}>{error}</p>}
             </div>
           </div>
         </div>
         <div style={{ padding: "12px var(--card-pad)", borderTop: "1px solid var(--border)", background: "var(--surface-2)",
           borderRadius: "0 0 var(--radius) var(--radius)", display: "flex", justifyContent: "flex-end", gap: 9 }}>
           <button className="btn btn--sm" onClick={onCancel}>취소</button>
-          <button className="btn btn--sm btn--danger" onClick={onConfirm}><Icon name="trash" size={14} />영구 삭제</button>
+          <button className="btn btn--sm btn--danger" disabled={busy} onClick={onConfirm}>
+            <Icon name="trash" size={14} />{busy ? "삭제 중…" : "영구 삭제"}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-export function Report({ onOpen, pushToast }) {
-  const report = REPORT;
+export function Report({ id, onOpen, pushToast }) {
+  const [report, setReport] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const [flag, setFlag] = useState(null);
   const [del, setDel] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delError, setDelError] = useState(null);
   const [catFilter, setCatFilter] = useState("전체");
+
+  useEffect(() => {
+    let on = true;
+    setReport(null); setLoadError(null);
+    fetchReport(id).then(r => on && setReport(r)).catch(e => on && setLoadError(String(e.message || e)));
+    return () => { on = false; };
+  }, [id]);
+
+  async function confirmDelete() {
+    setDelBusy(true); setDelError(null);
+    try {
+      await deleteVideo(id);
+      setDel(false);
+      pushToast({ title: report.meta.title, deleted: true });
+      onOpen({ view: "dashboard" });
+    } catch (e) { setDelError(String(e.message || e)); }
+    finally { setDelBusy(false); }
+  }
+
+  if (loadError) return (
+    <div className="view fade">
+      <div className="card" style={{ padding: "var(--card-pad)", color: "var(--block)" }}>리포트를 불러올 수 없습니다: {loadError}</div>
+    </div>
+  );
+  if (!report) return <div className="view fade"><div className="muted" style={{ padding: 30 }}>리포트 불러오는 중…</div></div>;
 
   const cats = ["전체", ...Array.from(new Set(report.flags.map(f => f.cat)))];
   const flags = catFilter === "전체" ? report.flags : report.flags.filter(f => f.cat === catFilter);
@@ -159,8 +191,8 @@ export function Report({ onOpen, pushToast }) {
           <p className="mono" style={{ fontSize: 12 }}>{report.meta.file} · {report.meta.size} · {tc(report.meta.duration)}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn"><Icon name="download" size={15} />report.json</button>
-          <button className="btn"><Icon name="download" size={15} />violations.csv</button>
+          <a className="btn" href={`/api/videos/${id}/report.json`} download><Icon name="download" size={15} />report.json</a>
+          <a className="btn" href={`/api/videos/${id}/violations.csv`} download><Icon name="download" size={15} />violations.csv</a>
           <button className="btn btn--danger" onClick={() => setDel(true)}><Icon name="trash" size={15} />삭제</button>
         </div>
       </div>
@@ -188,9 +220,11 @@ export function Report({ onOpen, pushToast }) {
             </div>
           </div>
           <div className="card__b">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(208px, 1fr))", gap: "var(--gap)" }}>
-              {flags.map((f, i) => <FlagCard key={i} f={f} onClick={() => setFlag(f)} />)}
-            </div>
+            {flags.length === 0
+              ? <p className="muted" style={{ margin: 0 }}>위반·검토필요 프레임이 없습니다 — 통과.</p>
+              : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(208px, 1fr))", gap: "var(--gap)" }}>
+                  {flags.map((f, i) => <FlagCard key={i} f={f} onClick={() => setFlag(f)} />)}
+                </div>}
           </div>
         </div>
 
@@ -198,9 +232,8 @@ export function Report({ onOpen, pushToast }) {
       </div>
 
       <FlagModal flag={flag} onClose={() => setFlag(null)} />
-      {del && <DeleteModal title={report.meta.title}
-        onCancel={() => setDel(false)}
-        onConfirm={() => { setDel(false); pushToast({ title: report.meta.title, deleted: true }); onOpen({ view: "dashboard" }); }} />}
+      {del && <DeleteModal title={report.meta.title} busy={delBusy} error={delError}
+        onCancel={() => { setDel(false); setDelError(null); }} onConfirm={confirmDelete} />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
-// dashboard.jsx — 대시보드 (영상 목록 + 상태/심각도)
-import { useState } from "react";
-import { VIDEOS, tc } from "./data.js";
+// dashboard.jsx — 대시보드 (영상 목록 + 상태/심각도) — API 실데이터
+import { useEffect, useState } from "react";
+import { tc } from "./data.js";
+import { fetchVideos } from "./api.js";
 import { Icon, SevBadge, Thumb } from "./ui.jsx";
 
 function StatCard({ label, value, sub, tone }) {
@@ -30,16 +31,25 @@ function CountPills({ counts }) {
   );
 }
 
-export function Dashboard({ onOpen }) {
+export function Dashboard({ onOpen, refreshKey }) {
   const [q, setQ] = useState("");
-  const videos = VIDEOS;
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let on = true;
+    fetchVideos().then(v => { if (on) { setVideos(v); setLoading(false); } })
+      .catch(() => on && setLoading(false));
+    return () => { on = false; };
+  }, [refreshKey]);
+
   const done = videos.filter(v => v.status === "done");
   const blocked = done.filter(v => v.worstScore >= 4).length;
   const review = done.filter(v => v.worstScore === 3).length;
-  const totalDur = done.reduce((a, v) => a + v.duration, 0);
+  const totalDur = done.reduce((a, v) => a + (v.duration || 0), 0);
 
   const filtered = videos.filter(v =>
-    !q || v.title.includes(q) || v.program.includes(q) || v.file.includes(q));
+    !q || v.title.includes(q) || (v.program || "").includes(q) || (v.file || "").includes(q));
 
   return (
     <div className="view fade">
@@ -73,6 +83,20 @@ export function Dashboard({ onOpen }) {
                 borderRadius: 7, font: "inherit", fontSize: 13, background: "var(--surface-2)", color: "var(--text)" }} />
           </div>
         </div>
+        {filtered.length === 0 ? (
+          <div style={{ padding: "44px var(--card-pad)", textAlign: "center", color: "var(--text-3)" }}>
+            {loading ? "불러오는 중…" : q ? "검색 결과가 없습니다." : (
+              <>
+                아직 업로드된 영상이 없습니다.
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn btn--primary" onClick={() => onOpen({ view: "upload" })}>
+                    <Icon name="upload" size={15} />첫 영상 업로드
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
         <div style={{ overflowX: "auto" }}>
           <table className="tbl">
             <thead>
@@ -89,30 +113,36 @@ export function Dashboard({ onOpen }) {
             </thead>
             <tbody>
               {filtered.map(v => (
-                <tr key={v.id} onClick={() => v.status === "done" && onOpen({ view: "report", id: v.id })}>
+                <tr key={v.id} onClick={() => v.status === "done" && onOpen({ view: "report", id: v.id })}
+                  style={v.status !== "done" ? { cursor: "default" } : undefined}>
                   <td>
-                    <Thumb t={null} style={{ width: 76 }} sev={v.status === "done" ? v.worstScore : null}
-                      cat={v.topCategory} />
+                    <Thumb t={null} style={{ width: 76 }} src={v.thumb}
+                      sev={v.status === "done" ? v.worstScore : null} cat={v.topCategory} />
                   </td>
                   <td>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{v.title}</div>
                     <div className="mono muted" style={{ fontSize: 11.5, marginTop: 2 }}>{v.file} · {v.size}</div>
                   </td>
                   <td><span className="chip">{v.program}</span></td>
-                  <td className="mono" style={{ fontSize: 13 }}>{tc(v.duration)}</td>
+                  <td className="mono" style={{ fontSize: 13 }}>{tc(v.duration || 0)}</td>
                   <td>
-                    <span style={{ fontSize: 12.5, color: v.captionSource.includes("음성") ? "var(--primary)" : "var(--text-2)" }}>
-                      {v.captionSource}
+                    <span style={{ fontSize: 12.5, color: (v.captionSource || "").includes("음성") ? "var(--primary)" : "var(--text-2)" }}>
+                      {v.captionSource || "—"}
                     </span>
                   </td>
                   <td><CountPills counts={v.counts} /></td>
-                  <td><SevBadge score={v.worstScore} /></td>
-                  <td style={{ color: "var(--text-3)" }}><Icon name="chevR" size={16} /></td>
+                  <td>
+                    {v.status === "processing" ? <span className="badge badge--neutral pulse">처리 중</span>
+                      : v.status === "error" ? <span className="badge badge--caution"><span className="dot" />오류</span>
+                      : <SevBadge score={v.worstScore} />}
+                  </td>
+                  <td style={{ color: "var(--text-3)" }}>{v.status === "done" && <Icon name="chevR" size={16} />}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
-// report-info.jsx — 리포트 분석 정보 탭 + 위반 프레임 상세 모달
+// report-info.jsx — 리포트 분석 정보 탭 + 위반 프레임 상세 모달 (API 실데이터)
 import { useState } from "react";
-import { CATEGORIES, severityOf, tc } from "./data.js";
+import { CATEGORIES, tc } from "./data.js";
 import { CatSquare, Icon, SevBadge, Thumb } from "./ui.jsx";
 
 // ── 분석 정보 탭 ───────────────────────────────
@@ -31,39 +31,44 @@ export function AnalysisTabs({ report }) {
             <dt>파일명</dt><dd className="mono" style={{ fontSize: 12.5 }}>{m.file}</dd>
             <dt>크기</dt><dd>{m.size}</dd>
             <dt>길이</dt><dd className="mono">{tc(m.duration)}</dd>
-            <dt>해상도</dt><dd className="mono" style={{ fontSize: 12.5 }}>{m.resolution}</dd>
+            <dt>해상도</dt><dd className="mono" style={{ fontSize: 12.5 }}>{m.resolution || "—"}</dd>
             <dt>업로드</dt><dd className="mono" style={{ fontSize: 12.5 }}>{m.uploadedAt}</dd>
-            <dt>처리 완료</dt><dd className="mono" style={{ fontSize: 12.5 }}>{m.processedAt}</dd>
-            <dt>자막 출처</dt><dd style={{ gridColumn: "2 / -1" }}>{m.captionSource}</dd>
+            <dt>처리 완료</dt><dd className="mono" style={{ fontSize: 12.5 }}>{m.processedAt || "—"}</dd>
+            <dt>자막 출처</dt><dd style={{ gridColumn: "2 / -1" }}>{m.captionSource || "—"}</dd>
           </dl>
         )}
         {tab === "기술 검토" && (
-          <table className="tbl">
-            <thead><tr><th style={{ width: 110 }}>유형</th><th style={{ width: 170 }}>구간</th><th>비고</th></tr></thead>
-            <tbody>
-              {report.tech.map((x, i) => (
-                <tr key={i} style={{ cursor: "default" }}>
-                  <td><span className="chip">{x.kind}</span></td>
-                  <td className="mono" style={{ fontSize: 13 }}>{x.range}</td>
-                  <td className="muted">{x.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          report.tech.length === 0
+            ? <p className="muted" style={{ margin: 0 }}>감지된 무음·블랙·프리즈 구간이 없습니다.</p>
+            : <table className="tbl">
+                <thead><tr><th style={{ width: 110 }}>유형</th><th style={{ width: 170 }}>구간</th><th>비고</th></tr></thead>
+                <tbody>
+                  {report.tech.map((x, i) => (
+                    <tr key={i} style={{ cursor: "default" }}>
+                      <td><span className="chip">{x.kind}</span></td>
+                      <td className="mono" style={{ fontSize: 13 }}>{x.range}</td>
+                      <td className="muted">{x.note || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
         )}
         {tab === "장면 분석" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "var(--gap)" }}>
-            {report.scenes.map((s, i) => (
-              <div key={i}>
-                <Thumb t={s.t} play />
-                <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 7, lineHeight: 1.5 }}>{s.desc}</div>
+          report.scenes.length === 0
+            ? <p className="muted" style={{ margin: 0 }}>장면 분석 결과가 없습니다 (단계 실패 또는 생략).</p>
+            : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "var(--gap)" }}>
+                {report.scenes.map((s, i) => (
+                  <div key={i}>
+                    <Thumb t={s.t} src={s.frame} play />
+                    <div style={{ fontSize: 12.5, color: "var(--text-2)", marginTop: 7, lineHeight: 1.5 }}>{s.desc}</div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
         )}
         {tab === "자막 교정" && (
           <div style={{ display: "grid", gap: 10 }}>
             <p className="muted" style={{ margin: "0 0 4px", fontSize: 12.5 }}>AI가 교정한 문장만 표시합니다 — 원본 → 교정.</p>
+            {report.corrections.length === 0 && <p className="muted" style={{ margin: 0 }}>교정된 문장이 없습니다.</p>}
             {report.corrections.map((c, i) => (
               <div key={i} style={{ display: "grid", gridTemplateColumns: "62px 1fr", gap: 12, alignItems: "center",
                 padding: "11px 14px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8 }}>
@@ -78,15 +83,17 @@ export function AnalysisTabs({ report }) {
           </div>
         )}
         {tab === "자막 전문" && (
-          <div style={{ maxHeight: 320, overflowY: "auto", display: "grid", gap: 2, paddingRight: 4 }}>
-            {report.captions.map((c, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 12,
-                padding: "7px 4px", borderBottom: "1px solid var(--border)" }}>
-                <span className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{tc(c.t)}</span>
-                <span style={{ fontSize: 13.5 }}>{c.text}</span>
+          report.captions.length === 0
+            ? <p className="muted" style={{ margin: 0 }}>자막이 없습니다.</p>
+            : <div style={{ maxHeight: 320, overflowY: "auto", display: "grid", gap: 2, paddingRight: 4 }}>
+                {report.captions.map((c, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "60px 1fr", gap: 12,
+                    padding: "7px 4px", borderBottom: "1px solid var(--border)" }}>
+                    <span className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{tc(c.t)}</span>
+                    <span style={{ fontSize: 13.5 }}>{c.text}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
         )}
       </div>
     </div>
@@ -96,10 +103,7 @@ export function AnalysisTabs({ report }) {
 // ── 위반 프레임 상세 모달 ───────────────────────────────
 export function FlagModal({ flag, onClose }) {
   if (!flag) return null;
-  const sev = severityOf(flag.score);
-  // 연속 묶음 시각화: 판정에 사용한 프레임 수
-  const groupN = flag.group || 1;
-  const frames = Array.from({ length: groupN }, (_, i) => flag.t + i);
+  const frames = flag.frames?.length ? flag.frames : [null];
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "oklch(0.2 0.02 262 / 0.45)",
       zIndex: 60, display: "grid", placeItems: "center", padding: 24, animation: "fadeUp 0.2s ease both" }}>
@@ -108,7 +112,7 @@ export function FlagModal({ flag, onClose }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <CatSquare cat={flag.cat} size={22} />
             <div>
-              <h3>{CATEGORIES[flag.cat].label} · {tc(flag.t)}</h3>
+              <h3>{CATEGORIES[flag.cat]?.label || flag.cat} · {tc(flag.t)}</h3>
               <div className="muted" style={{ fontSize: 11.5 }}>판정 근거 · {flag.basis}</div>
             </div>
           </div>
@@ -118,11 +122,11 @@ export function FlagModal({ flag, onClose }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <SevBadge score={flag.score} />
             <span className="mono muted" style={{ fontSize: 12 }}>심각도 {flag.score} / 5</span>
-            {flag.audio !== "—" && <span className="chip" style={{ marginLeft: "auto" }}><Icon name="wave" size={13} />{flag.audio}</span>}
+            {flag.audio && flag.audio !== "—" && <span className="chip" style={{ marginLeft: "auto" }}><Icon name="wave" size={13} />{flag.audio}</span>}
           </div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>연속 묶음 판정 — {groupN}장</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>연속 묶음 판정 — {flag.group || frames.length}장</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            {frames.map((ft, i) => <Thumb key={i} t={ft} style={{ flex: 1 }} sev={flag.score} />)}
+            {frames.map((src, i) => <Thumb key={i} t={flag.t + i} src={src} style={{ flex: 1 }} sev={flag.score} />)}
           </div>
           <div className="eyebrow" style={{ marginBottom: 6 }}>판정 내용</div>
           <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: "var(--text)" }}>{flag.desc}</p>

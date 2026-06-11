@@ -1,5 +1,6 @@
-// app.jsx — 셸: 사이드바 내비 · 라우터 · 토스트
+// app.jsx — 셸: 사이드바 내비 · 라우터 · 토스트 · 전역 SSE
 import { useEffect, useState } from "react";
+import { fetchVideos, subscribeEvents } from "./api.js";
 import { Icon } from "./ui.jsx";
 import { Dashboard } from "./dashboard.jsx";
 import { Upload } from "./upload.jsx";
@@ -10,7 +11,7 @@ function NavItem({ icon, label, active, badge, onClick }) {
   return (
     <button className={"nav__item" + (active ? " nav__item--active" : "")} onClick={onClick}>
       <Icon name={icon} size={17} />{label}
-      {badge != null && <span className="nav__badge">{badge}</span>}
+      {badge != null && badge !== 0 && <span className="nav__badge">{badge}</span>}
     </button>
   );
 }
@@ -57,8 +58,26 @@ export function App() {
     catch { return { view: "dashboard" }; }
   });
   const [toasts, setToasts] = useState([]);
+  const [processing, setProcessing] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => { try { localStorage.setItem("arc.route", JSON.stringify(route)); } catch {} }, [route]);
+
+  function refreshProcessing() {
+    fetchVideos().then(vs => setProcessing(vs.filter(v => v.status === "processing").length)).catch(() => {});
+  }
+  useEffect(refreshProcessing, []);
+
+  // 전역 SSE: 완료 토스트 + 처리 중 배지 + 대시보드 갱신
+  useEffect(() => subscribeEvents(ev => {
+    if (ev.type === "video-done") {
+      pushToast({ title: ev.title, err: (ev.failedStages || []).length > 0 });
+      setRefreshKey(k => k + 1);
+      refreshProcessing();
+    } else if (ev.type === "stage" && ev.progress === 0) {
+      refreshProcessing();
+    }
+  }), []);
 
   function onOpen(r) { setRoute(r); document.querySelector(".main")?.scrollTo(0, 0); }
   function pushToast(data) { const id = Math.random(); setToasts(p => [...p, { id, ...data }]); }
@@ -66,7 +85,7 @@ export function App() {
 
   const nav = [
     { view: "dashboard", icon: "grid",   label: "대시보드" },
-    { view: "upload",    icon: "upload", label: "업로드 · 처리", badge: 1 },
+    { view: "upload",    icon: "upload", label: "업로드 · 처리", badge: processing },
     { view: "search",    icon: "search", label: "검색" },
   ];
 
@@ -87,17 +106,17 @@ export function App() {
             onClick={() => onOpen({ view: n.view })} />
         ))}
         <div className="nav__group">심의 기준</div>
-        <NavItem icon="doc" label="금칙기준.md" onClick={() => pushToast({ title: "rules/금칙기준.md", err: false })} />
-        <NavItem icon="doc" label="운영절차서.md" onClick={() => pushToast({ title: "운영절차서.md", err: false })} />
+        <NavItem icon="doc" label="금칙기준.md" onClick={() => pushToast({ title: "rules/금칙기준.md — 수정 시 다음 영상부터 적용", err: false })} />
+        <NavItem icon="doc" label="운영절차서.md" onClick={() => pushToast({ title: "server/docs/운영절차서.md", err: false })} />
         <div className="nav__spacer" />
         <div className="nav__foot">저장소 2종 병행 · <b>재시작 후 유지</b><br />키워드 색인 + 벡터 색인</div>
       </nav>
 
       <main className="main">
-        {route.view === "dashboard" && <Dashboard onOpen={onOpen} />}
-        {route.view === "upload" && <Upload onOpen={onOpen} pushToast={pushToast} />}
+        {route.view === "dashboard" && <Dashboard onOpen={onOpen} refreshKey={refreshKey} />}
+        {route.view === "upload" && <Upload onOpen={onOpen} />}
         {route.view === "search" && <Search onOpen={onOpen} />}
-        {route.view === "report" && <Report onOpen={onOpen} pushToast={pushToast} />}
+        {route.view === "report" && <Report id={route.id} onOpen={onOpen} pushToast={pushToast} />}
       </main>
 
       <div style={{ position: "fixed", right: 20, bottom: 20, zIndex: 80, display: "grid", gap: 10 }}>

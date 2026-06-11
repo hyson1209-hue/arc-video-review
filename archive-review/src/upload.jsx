@@ -1,79 +1,12 @@
-// upload.jsx — 업로드 + 실시간 병렬 처리 진행 상황
+// upload.jsx — 실제 업로드 + SSE 실시간 병렬 처리 진행 상황
 import { useEffect, useRef, useState } from "react";
+import { STAGE_DEFS, STAGE_GROUPS } from "./data.js";
+import { fetchVideos, subscribeEvents, uploadFiles } from "./api.js";
 import { Icon, Thumb } from "./ui.jsx";
 
-// 처리 단계 정의 (병렬 / 의존 관계)
-//  언어: 자막 추출 → 교정 (순차)
-//  분석: 장면 분석 ∥ 기술 검토 (병렬) → 색인 생성
-//  검수: 프레임 샘플링 → (50%부터) 프레임 금칙 판정 → 종합 판정
-const STAGES_DEF = [
-  { key: "extract", label: "자막 추출",        group: "언어", deps: [], rate: 3.4 },
-  { key: "correct", label: "자막 교정",        group: "언어", deps: ["extract"], rate: 2.7 },
-  { key: "scene",   label: "장면 분석",        group: "분석", deps: [], rate: 1.9 },
-  { key: "tech",    label: "기술 검토",        group: "분석", deps: [], rate: 3.1 },
-  { key: "index",   label: "색인 생성",        group: "분석", deps: ["correct", "scene", "tech"], rate: 4.2 },
-  { key: "sample",  label: "프레임 샘플링",    group: "검수", deps: [], rate: 2.4 },
-  { key: "judge",   label: "프레임 금칙 판정", group: "검수", deps: ["sample"], soft: { sample: 52 }, rate: 1.5 },
-  { key: "verdict", label: "종합 판정",        group: "검수", deps: ["judge"], rate: 6 },
-];
-const GROUPS = ["언어", "분석", "검수"];
-const SAMPLE_FILES = [
-  { file: "drama_ep13_master.mxf", title: "도시의 밤 — 13회", size: "8.1 GB" },
-  { file: "variety_special.mp4",   title: "특집 예능 — 단편",  size: "4.4 GB" },
-  { file: "doc_river_part2.mxf",   title: "한강의 사계 — 2부", size: "9.0 GB" },
-];
+const newStages = () => Object.fromEntries(STAGE_DEFS.map(s => [s.key, { status: "wait", progress: 0, error: null }]));
 
-let JOB_SEQ = 100;
-function makeJob(src, opts = {}) {
-  return {
-    uid: ++JOB_SEQ,
-    file: src.file, title: src.title, size: src.size,
-    startedAt: Date.now(),
-    notified: false,
-    failScene: !!opts.failScene,
-    stages: STAGES_DEF.map(s => ({
-      ...s,
-      progress: 0,
-      status: "wait",
-      phase: s.key === "extract" ? "자막 트랙 탐색" : null,
-    })),
-  };
-}
-
-function advanceJob(job) {
-  const map = Object.fromEntries(job.stages.map(s => [s.key, s]));
-  let allDone = true;
-  for (const s of job.stages) {
-    if (s.status === "done" || s.status === "error") continue;
-    allDone = false;
-    const ready = s.deps.every(d => {
-      const dep = map[d];
-      if (dep.status === "error") return true;            // 실패해도 다음 단계 진행
-      const need = (s.soft && s.soft[d]) || 100;
-      return dep.progress >= need;
-    });
-    if (!ready) continue;
-    if (s.status === "wait") s.status = "run";
-    // 장면 분석 실패 데모
-    if (job.failScene && s.key === "scene" && s.progress >= 38) {
-      s.status = "error"; s.phase = "프레임 디코드 오류 — 건너뜀"; continue;
-    }
-    s.progress = Math.min(100, s.progress + s.rate * (0.7 + Math.random() * 0.6));
-    if (s.key === "extract") s.phase = s.progress < 45 ? "음성 인식 받아쓰기" : "자막 정렬";
-    if (s.key === "sample") s.phase = "약 1초 간격 추출";
-    if (s.key === "judge") s.phase = "연속 2~3장 묶음 판정";
-    if (s.progress >= 100) { s.progress = 100; s.status = "done"; s.phase = null; }
-  }
-  if (allDone && !job.done) job.done = true;
-  return job;
-}
-
-function jobPct(job) {
-  const eff = job.stages.map(s => s.status === "error" ? 100 : s.progress);
-  return Math.round(eff.reduce((a, b) => a + b, 0) / eff.length);
-}
-
-function StageRow({ s }) {
+function StageRow({ def, s }) {
   const fillClass = s.status === "done" ? "bar__fill--done" : s.status === "error" ? "bar__fill--err" : "";
   const statusEl =
     s.status === "done" ? <span style={{ color: "var(--pass)", display: "inline-flex" }}><Icon name="check" size={15} /></span>
@@ -83,27 +16,33 @@ function StageRow({ s }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "126px 1fr 46px", alignItems: "center", gap: 12 }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 500, color: s.status === "wait" ? "var(--text-3)" : "var(--text)" }}>{s.label}</div>
-        {s.phase && <div className="mono" style={{ fontSize: 10.5, color: s.status === "error" ? "var(--block)" : "var(--text-3)", marginTop: 1 }}>{s.phase}</div>}
+        <div style={{ fontSize: 12.5, fontWeight: 500, color: s.status === "wait" ? "var(--text-3)" : "var(--text)" }}>{def.label}</div>
+        {s.status === "error" && <div className="mono" style={{ fontSize: 10.5, color: "var(--block)", marginTop: 1,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.error}>{s.error || "오류 — 건너뜀"}</div>}
       </div>
       <div className="bar"><div className={"bar__fill " + fillClass}
-        style={{ width: (s.status === "error" ? 38 : s.progress) + "%", opacity: s.status === "wait" ? 0 : 1 }} /></div>
+        style={{ width: (s.status === "error" ? Math.max(10, s.progress) : s.progress) + "%", opacity: s.status === "wait" ? 0 : 1 }} /></div>
       <div style={{ textAlign: "right" }}>{statusEl}</div>
     </div>
   );
 }
 
+function jobPct(stages) {
+  const vals = STAGE_DEFS.map(d => stages[d.key]?.status === "error" ? 100 : stages[d.key]?.progress || 0);
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
 function JobCard({ job, onOpen }) {
-  const pct = jobPct(job);
-  const hasErr = job.stages.some(s => s.status === "error");
+  const pct = jobPct(job.stages);
+  const hasErr = STAGE_DEFS.some(d => job.stages[d.key]?.status === "error");
   return (
     <div className="card fade" style={{ marginBottom: "var(--gap)" }}>
       <div className="card__h">
         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <Thumb t={null} style={{ width: 64, flex: "none" }} play />
+          <Thumb t={null} style={{ width: 64, flex: "none" }} src={job.thumb} play />
           <div style={{ minWidth: 0 }}>
             <h3 style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{job.title}</h3>
-            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 2 }}>{job.file} · {job.size}</div>
+            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 2 }}>{job.file}{job.size ? ` · ${job.size}` : ""}</div>
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
@@ -116,11 +55,12 @@ function JobCard({ job, onOpen }) {
         </div>
       </div>
       <div className="card__b" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "calc(var(--gap) + 4px)" }}>
-        {GROUPS.map(g => (
+        {STAGE_GROUPS.map(g => (
           <div key={g}>
             <div className="eyebrow" style={{ marginBottom: 10 }}>{g}</div>
             <div style={{ display: "grid", gap: 11 }}>
-              {job.stages.filter(s => s.group === g).map(s => <StageRow key={s.key} s={s} />)}
+              {STAGE_DEFS.filter(d => d.group === g).map(d =>
+                <StageRow key={d.key} def={d} s={job.stages[d.key] || { status: "wait", progress: 0 }} />)}
             </div>
           </div>
         ))}
@@ -133,7 +73,7 @@ function JobCard({ job, onOpen }) {
             <Icon name="bell" size={14} />텔레그램으로 결과 요약 전송됨
             {hasErr && <span className="badge badge--caution" style={{ marginLeft: 4 }}><span className="dot" />일부 단계 실패 · 나머지 완료</span>}
           </span>
-          <button className="btn btn--sm btn--primary" onClick={() => onOpen({ view: "report", id: "v-2041" })}>
+          <button className="btn btn--sm btn--primary" onClick={() => onOpen({ view: "report", id: job.id })}>
             리포트 보기<Icon name="chevR" size={14} />
           </button>
         </div>
@@ -142,52 +82,54 @@ function JobCard({ job, onOpen }) {
   );
 }
 
-export function Upload({ onOpen, pushToast }) {
-  const [jobs, setJobs] = useState(() => {
-    const seed = makeJob(SAMPLE_FILES[0], { failScene: true });
-    // 진행 중 상태로 시작
-    seed.stages.find(s => s.key === "extract").progress = 100;
-    seed.stages.find(s => s.key === "extract").status = "done";
-    seed.stages.find(s => s.key === "correct").progress = 64;
-    seed.stages.find(s => s.key === "correct").status = "run";
-    seed.stages.find(s => s.key === "tech").progress = 100;
-    seed.stages.find(s => s.key === "tech").status = "done";
-    seed.stages.find(s => s.key === "scene").progress = 38;
-    seed.stages.find(s => s.key === "scene").status = "error";
-    seed.stages.find(s => s.key === "scene").phase = "프레임 디코드 오류 — 건너뜀";
-    seed.stages.find(s => s.key === "sample").progress = 47;
-    seed.stages.find(s => s.key === "sample").status = "run";
-    return [seed];
-  });
-  const [idx, setIdx] = useState(1);
+export function Upload({ onOpen }) {
+  const [jobs, setJobs] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState(null);
   const dragRef = useRef(false);
   const [drag, setDrag] = useState(false);
+  const fileRef = useRef(null);
 
+  // 진입 시 처리 중/최근 영상 카드 복원
   useEffect(() => {
-    const id = setInterval(() => {
-      setJobs(prev => {
-        let changed = false;
-        const next = prev.map(j => {
-          if (j.done) return j;
-          const nj = advanceJob({ ...j, stages: j.stages.map(s => ({ ...s })) });
-          changed = true;
-          if (nj.done && !nj.notified) {
-            nj.notified = true;
-            const err = nj.stages.some(s => s.status === "error");
-            setTimeout(() => pushToast({ title: nj.title, err }), 0);
-          }
-          return nj;
-        });
-        return changed ? next : prev;
-      });
-    }, 160);
-    return () => clearInterval(id);
+    let on = true;
+    fetchVideos().then(vs => {
+      if (!on) return;
+      setJobs(vs.filter(v => v.status !== "error").slice(0, 8).map(v => ({
+        id: v.id, title: v.title, file: v.file, size: v.size, thumb: v.thumb,
+        done: v.status === "done",
+        stages: { ...newStages(), ...Object.fromEntries((v.stages || []).map(s => [s.key, s])) },
+      })));
+    }).catch(() => {});
+    return () => { on = false; };
   }, []);
 
-  function addJob() {
-    const src = SAMPLE_FILES[idx % SAMPLE_FILES.length];
-    setIdx(i => i + 1);
-    setJobs(prev => [makeJob(src), ...prev]);
+  // SSE — 단계 진행률·완료
+  useEffect(() => subscribeEvents(ev => {
+    if (ev.type === "stage") {
+      setJobs(prev => prev.map(j => j.id === ev.videoId
+        ? { ...j, stages: { ...j.stages, [ev.key]: { status: ev.status, progress: ev.progress, error: ev.error } } }
+        : j));
+    } else if (ev.type === "video-done") {
+      setJobs(prev => prev.map(j => j.id === ev.videoId ? { ...j, done: true } : j));
+    }
+  }), []);
+
+  async function doUpload(files) {
+    if (!files?.length || uploading) return;
+    setUploading(true); setError(null);
+    try {
+      const list = [...files];
+      const created = await uploadFiles(list);
+      setJobs(prev => [
+        ...created.map((c, i) => ({
+          id: c.id, title: c.title, file: list[i]?.name || c.title, size: fmtSize(list[i]?.size),
+          done: false, stages: newStages(),
+        })),
+        ...prev,
+      ]);
+    } catch (e) { setError(String(e.message || e)); }
+    finally { setUploading(false); }
   }
 
   const active = jobs.filter(j => !j.done).length;
@@ -205,10 +147,13 @@ export function Upload({ onOpen, pushToast }) {
         </button>
       </div>
 
+      <input ref={fileRef} type="file" multiple accept="video/*,.mxf,.mov,.mp4,.mkv"
+        style={{ display: "none" }} onChange={e => { doUpload(e.target.files); e.target.value = ""; }} />
+
       <div className="card" style={{ marginBottom: "var(--gap)" }}
         onDragOver={e => { e.preventDefault(); if (!dragRef.current) { dragRef.current = true; setDrag(true); } }}
         onDragLeave={() => { dragRef.current = false; setDrag(false); }}
-        onDrop={e => { e.preventDefault(); dragRef.current = false; setDrag(false); addJob(); }}>
+        onDrop={e => { e.preventDefault(); dragRef.current = false; setDrag(false); doUpload(e.dataTransfer.files); }}>
         <div style={{ padding: "30px var(--card-pad)", border: "1.5px dashed " + (drag ? "var(--primary)" : "var(--border-2)"),
           borderRadius: "var(--radius)", margin: 10, background: drag ? "var(--primary-soft)" : "var(--surface-2)",
           display: "flex", alignItems: "center", justifyContent: "center", gap: 18, transition: "all 0.15s", textAlign: "center", flexWrap: "wrap" }}>
@@ -219,8 +164,11 @@ export function Upload({ onOpen, pushToast }) {
           <div style={{ textAlign: "left" }}>
             <div style={{ fontWeight: 600, fontSize: 14.5 }}>영상 파일을 여기에 끌어다 놓으세요</div>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>MXF · MOV · MP4 — 1개 이상 누적 업로드 가능</div>
+            {error && <div style={{ fontSize: 12.5, color: "var(--block)", marginTop: 4 }}>업로드 실패: {error}</div>}
           </div>
-          <button className="btn btn--primary" onClick={addJob}><Icon name="upload" size={15} />파일 선택</button>
+          <button className="btn btn--primary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+            <Icon name="upload" size={15} />{uploading ? "업로드 중…" : "파일 선택"}
+          </button>
         </div>
       </div>
 
@@ -230,7 +178,14 @@ export function Upload({ onOpen, pushToast }) {
         <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>영상 간 · 영상 내 단계 병렬 실행</span>
       </div>
 
-      {jobs.map(j => <JobCard key={j.uid} job={j} onOpen={onOpen} />)}
+      {jobs.length === 0 && (
+        <div className="card" style={{ padding: "28px var(--card-pad)", textAlign: "center", color: "var(--text-3)" }}>
+          처리 이력이 없습니다 — 첫 영상을 업로드해 보세요.
+        </div>
+      )}
+      {jobs.map(j => <JobCard key={j.id} job={j} onOpen={onOpen} />)}
     </div>
   );
 }
+
+const fmtSize = (b) => b == null ? "" : b >= 1024 ** 3 ? (b / 1024 ** 3).toFixed(1) + " GB" : Math.round(b / 1024 ** 2) + " MB";

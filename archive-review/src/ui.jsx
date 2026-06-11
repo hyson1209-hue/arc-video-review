@@ -1,4 +1,5 @@
 // ui.jsx — 공유 컴포넌트: 아이콘, 배지, 카테고리 칩, 프레임 썸네일
+import { useState } from "react";
 import { CATEGORIES, severityOf, tc } from "./data.js";
 
 // 라인 아이콘 세트 (단순 stroke)
@@ -73,13 +74,16 @@ export function SevBadge({ score, withDot = true }) {
   );
 }
 
-// 영상 프레임 썸네일 (플레이스홀더 — 실제 프레임 자리)
-export function Thumb({ t, sev, cat, play, style }) {
+// 영상 프레임 썸네일 — src 있으면 실제 프레임, 없거나 로드 실패 시 플레이스홀더
+export function Thumb({ t, sev, cat, play, style, src }) {
+  const [err, setErr] = useState(false);
   const sevColor = sev != null
     ? { pass: "var(--pass)", caution: "var(--caution)", warn: "var(--warn)", block: "var(--block)" }[severityOf(sev).key]
     : null;
   return (
     <div className="thumb" style={style}>
+      {src && !err && <img src={src} alt="" onError={() => setErr(true)}
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
       {cat && <span className="thumb__tag"><CatSquare cat={cat} size={16} /></span>}
       {play && <span className="thumb__play"><Icon name="play" size={26} /></span>}
       {t != null && <span className="thumb__tc">{tc(t)}</span>}

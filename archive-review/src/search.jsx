@@ -1,6 +1,7 @@
-// search.jsx — 자연어 검색 (4모드 + 썸네일·출처·이유)
-import { useState } from "react";
-import { SEARCH_MODES, SEARCH_QUERY, SEARCH_RESULTS, tc } from "./data.js";
+// search.jsx — 자연어 검색 (4모드 + 썸네일·출처·이유) — API 실데이터
+import { useEffect, useState } from "react";
+import { SEARCH_MODES, tc } from "./data.js";
+import { searchApi } from "./api.js";
 import { Icon, Thumb } from "./ui.jsx";
 
 const SOURCE_META = {
@@ -10,7 +11,7 @@ const SOURCE_META = {
 };
 
 function SourceTag({ source }) {
-  const m = SOURCE_META[source];
+  const m = SOURCE_META[source] || SOURCE_META.keyword;
   return <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: m.color, background: m.bg,
     padding: "2px 8px", borderRadius: 5, letterSpacing: "-0.01em" }}>{m.label}</span>;
 }
@@ -20,7 +21,7 @@ function ScoreBar({ label, value }) {
     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
       <span className="mono muted" style={{ fontSize: 10.5, width: 16 }}>{label}</span>
       <div className="bar" style={{ width: 56, height: 4 }}>
-        <div className="bar__fill" style={{ width: value * 100 + "%", background: "var(--text-3)" }} />
+        <div className="bar__fill" style={{ width: Math.min(100, value * 100) + "%", background: "var(--text-3)" }} />
       </div>
       <span className="mono" style={{ fontSize: 10.5, color: "var(--text-2)" }}>{value.toFixed(2)}</span>
     </div>
@@ -28,12 +29,11 @@ function ScoreBar({ label, value }) {
 }
 
 function ResultRow({ r, mode, onOpen }) {
-  // filter 모드는 점수 대신 조건 매칭 강조 — 데모상 동일 결과 재사용
   return (
     <div className="card fade" style={{ padding: "var(--card-pad)", display: "grid",
       gridTemplateColumns: "168px 1fr", gap: 16, cursor: "pointer", alignItems: "start" }}
       onClick={() => onOpen({ view: "report", id: r.vid })}>
-      <Thumb t={r.t} style={{ width: 168 }} play />
+      <Thumb t={r.t} style={{ width: 168 }} src={r.frame} play />
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 600, fontSize: 14.5 }}>{r.video}</span>
@@ -47,8 +47,8 @@ function ResultRow({ r, mode, onOpen }) {
         </div>
         {mode !== "filter" && (
           <div style={{ display: "flex", gap: 16, marginTop: 11 }}>
-            <ScoreBar label="kw" value={r.scoreK} />
-            <ScoreBar label="vec" value={r.scoreV} />
+            <ScoreBar label="kw" value={r.scoreK || 0} />
+            <ScoreBar label="vec" value={r.scoreV || 0} />
           </div>
         )}
       </div>
@@ -58,14 +58,22 @@ function ResultRow({ r, mode, onOpen }) {
 
 export function Search({ onOpen }) {
   const [mode, setMode] = useState("hybrid");
-  const [q, setQ] = useState(SEARCH_QUERY);
-  const [submitted, setSubmitted] = useState(SEARCH_QUERY);
+  const [q, setQ] = useState("");
+  const [submitted, setSubmitted] = useState("");
+  const [results, setResults] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
 
-  // 모드별 정렬: vector → 의미점수, keyword → 키워드점수, hybrid → 합산
-  let results = [...SEARCH_RESULTS];
-  if (mode === "vector") results.sort((a, b) => b.scoreV - a.scoreV);
-  else if (mode === "keyword") results = results.filter(r => r.source !== "vector").sort((a, b) => b.scoreK - a.scoreK);
-  else if (mode === "hybrid") results.sort((a, b) => (b.scoreK + b.scoreV) - (a.scoreK + a.scoreV));
+  useEffect(() => {
+    if (!submitted.trim()) { setResults([]); return; }
+    let on = true;
+    setBusy(true); setError(null);
+    searchApi(submitted, mode)
+      .then(r => on && setResults(r))
+      .catch(e => on && setError(String(e.message || e)))
+      .finally(() => on && setBusy(false));
+    return () => { on = false; };
+  }, [submitted, mode]);
 
   return (
     <div className="view fade">
@@ -89,7 +97,9 @@ export function Search({ onOpen }) {
               style={{ width: "100%", padding: "11px 13px 11px 40px", border: "1px solid var(--border-2)",
                 borderRadius: 8, font: "inherit", fontSize: 14.5, background: "var(--surface-2)", color: "var(--text)" }} />
           </div>
-          <button className="btn btn--primary" onClick={() => setSubmitted(q)} style={{ padding: "11px 18px" }}>검색</button>
+          <button className="btn btn--primary" onClick={() => setSubmitted(q)} style={{ padding: "11px 18px" }}>
+            {busy ? "검색 중…" : "검색"}
+          </button>
         </div>
         <div style={{ display: "flex", gap: 7, marginTop: 14, flexWrap: "wrap" }}>
           {SEARCH_MODES.map(m => (
@@ -106,10 +116,19 @@ export function Search({ onOpen }) {
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 12px" }}>
-        <span style={{ fontSize: 13 }}>“<b>{submitted}</b>” 검색 결과 <span className="muted">· {results.length}건</span></span>
-        <span className="mono badge badge--neutral" style={{ marginLeft: "auto" }}>mode: {mode}</span>
-      </div>
+      {submitted && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 12px" }}>
+          <span style={{ fontSize: 13 }}>“<b>{submitted}</b>” 검색 결과 <span className="muted">· {results.length}건</span></span>
+          <span className="mono badge badge--neutral" style={{ marginLeft: "auto" }}>mode: {mode}</span>
+        </div>
+      )}
+
+      {error && <div className="card" style={{ padding: "var(--card-pad)", color: "var(--block)" }}>검색 실패: {error}</div>}
+      {!error && submitted && !busy && results.length === 0 && (
+        <div className="card" style={{ padding: "28px var(--card-pad)", textAlign: "center", color: "var(--text-3)" }}>
+          결과가 없습니다 — 다른 키워드나 모드를 시도해 보세요.
+        </div>
+      )}
 
       <div style={{ display: "grid", gap: "var(--gap)" }}>
         {results.map((r, i) => <ResultRow key={i} r={r} mode={mode} onOpen={onOpen} />)}
