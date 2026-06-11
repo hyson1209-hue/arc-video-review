@@ -41,8 +41,7 @@ function prepareUserData() {
   let envPath = path.join(ud, ".env");
   const devEnv = path.join(appRoot, ".env");
   if (!packaged && fs.existsSync(devEnv)) envPath = devEnv;
-  const envCreated = !fs.existsSync(envPath);
-  if (envCreated) fs.writeFileSync(envPath, ENV_TEMPLATE);
+  if (!fs.existsSync(envPath)) fs.writeFileSync(envPath, ENV_TEMPLATE);
 
   // 금칙기준.md — 없으면 번들 기본본 복사 (사용자가 수정하면 다음 영상부터 적용)
   const rulesPath = path.join(rulesDir, "금칙기준.md");
@@ -52,7 +51,13 @@ function prepareUserData() {
       : path.join(appRoot, "server", "rules", "금칙기준.md");
     fs.copyFileSync(bundled, rulesPath);
   }
-  return { dataDir, envPath, rulesPath, envCreated };
+  return { dataDir, envPath, rulesPath };
+}
+
+// .env 에 OPENAI_API_KEY 값이 실제로 채워져 있는지 (빈 값·주석은 미설정으로 본다)
+function hasApiKey(envPath) {
+  try { return /^\s*OPENAI_API_KEY\s*=\s*\S+/m.test(fs.readFileSync(envPath, "utf8")); }
+  catch { return false; }
 }
 
 function startServer(paths) {
@@ -102,7 +107,7 @@ async function createWindow() {
   }
   await win.loadURL(`http://localhost:${PORT}`);
 
-  if (paths.envCreated) {
+  if (!hasApiKey(paths.envPath)) {
     const { response } = await dialog.showMessageBox(win, {
       type: "info", title: "ARC 초기 설정",
       message: "OpenAI API 키가 설정되지 않았습니다.",
